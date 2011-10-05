@@ -138,7 +138,7 @@ class Unit:
 		print("  Generate ", self.targetname)
 
 		dirname = os.path.dirname(self.targetname)
-		if not os.path.exists(dirname):
+		if dirname and not os.path.exists(dirname):
 			os.makedirs(dirname)
 
 		tempname = self.targetname + ".tmp"

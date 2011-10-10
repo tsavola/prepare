@@ -30,9 +30,14 @@ class Project:
 		self.outputdir = outputdir
 		self.units = []
 
-	def add(self, sourcename):
-		targetname = os.path.join(self.outputdir, sourcename[:-1])
-		self.units.append(Unit(sourcename, targetname))
+	def add(self, sourcename, template):
+		if template:
+			targetname = os.path.join(self.outputdir, sourcename[:-1])
+			unit = TemplateUnit(sourcename, targetname)
+		else:
+			unit = CodeUnit(sourcename)
+
+		self.units.append(unit)
 
 	def process(self):
 		for unit in self.units:
@@ -67,51 +72,17 @@ class Project:
 		for unit in reverse_topological_sort(self.units, depends):
 			unit.evaluate(globaldict)
 
-class Unit:
+class AbstractUnit:
 
-	def __init__(self, sourcename, targetname):
+	def __init__(self, sourcename):
 		self.sourcename = sourcename
-		self.targetname = targetname
 
 	def parse(self):
-		self.blocks = []
 		self.declsyms = set()
 		self.refnames = set()
 
-		code_block = False
-		code_indent = None
-		code_source = ""
-
-		with open(self.sourcename) as sourcefile:
-			for text in sourcefile:
-				while text:
-					if code_block:
-						i = text.find("}}}")
-						if i >= 0:
-							code_block = False
-							if text[:i].strip():
-								code_source += text[:i]
-							self.blocks.append(CodeBlock(code_source, code_indent, self))
-							code_indent = None
-							code_source = ""
-							text = text[i+3:]
-						else:
-							if text.strip():
-								code_source += text
-							text = ""
-					else:
-						i = text.find("{{{")
-						if i >= 0:
-							code_block = True
-							self.blocks.append(TextBlock(text[:i]))
-							code_indent = re.sub(r"[^\t]", " ", text[:i])
-							text = code_indent + "   " + text[i+3:]
-							if not text.strip():
-								text = ""
-							text = "if True:\n" + text
-						else:
-							self.blocks.append(TextBlock(text))
-							text = ""
+		with open(self.sourcename) as file:
+			self.do_parse(file)
 
 		self.refnames -= set(s.name for s in self.declsyms)
 		self.refnames -= set(dir(__builtins__))
@@ -133,6 +104,50 @@ class Unit:
 
 			if symbol.consumer:
 				get_data(symbol.unit).consumers.add(self)
+
+class TemplateUnit(AbstractUnit):
+
+	def __init__(self, sourcename, targetname):
+		super().__init__(sourcename)
+
+		self.targetname = targetname
+
+	def do_parse(self, file):
+		self.blocks = []
+
+		code_block = False
+		code_indent = None
+		code_source = ""
+
+		for text in file:
+			while text:
+				if code_block:
+					i = text.find("}}}")
+					if i >= 0:
+						code_block = False
+						if text[:i].strip():
+							code_source += text[:i]
+						self.blocks.append(TemplateCodeBlock(code_source, code_indent, self))
+						code_indent = None
+						code_source = ""
+						text = text[i+3:]
+					else:
+						if text.strip():
+							code_source += text
+						text = ""
+				else:
+					i = text.find("{{{")
+					if i >= 0:
+						code_block = True
+						self.blocks.append(TextBlock(text[:i]))
+						code_indent = re.sub(r"[^\t]", " ", text[:i])
+						text = code_indent + "   " + text[i+3:]
+						if not text.strip():
+							text = ""
+						text = "if True:\n" + text
+					else:
+						self.blocks.append(TextBlock(text))
+						text = ""
 
 	def evaluate(self, globaldict):
 		dirname = os.path.dirname(self.targetname)
@@ -172,6 +187,50 @@ class Unit:
 		else:
 			os.remove(tempname)
 
+class CodeUnit(AbstractUnit):
+
+	def do_parse(self, file):
+		self.block = CodeBlock(file.read(), self)
+
+	def analyze_references(self, symbolmap, datamap):
+		def get_data(unit):
+			data = datamap.get(unit)
+			if data is None:
+				data = Data()
+				datamap[unit] = data
+
+			return data
+
+		for name in self.refnames:
+			symbol = symbolmap[name]
+
+			if symbol.producer:
+				get_data(symbol.unit).producers.add(self)
+
+			if symbol.consumer:
+				get_data(symbol.unit).consumers.add(self)
+
+	def evaluate(self, globaldict):
+		self.block.evaluate(globaldict)
+
+	def deploy(self, tempname):
+		changed = True
+
+		if os.path.exists(self.targetname):
+			with open(tempname) as file:
+				newdata = file.read()
+
+			with open(self.targetname) as file:
+				olddata = file.read()
+
+			changed = (newdata != olddata)
+
+		if changed:
+			print("  Update   ", self.targetname)
+			os.rename(tempname, self.targetname)
+		else:
+			os.remove(tempname)
+
 class TextBlock:
 
 	def __init__(self, text):
@@ -190,12 +249,11 @@ class CodeBlock:
 		 r"\1_echo(locals(), \2)\3"),
 	]]
 
-	def __init__(self, source, indent, unit):
+	def __init__(self, source, unit):
 		for pat, sub in self.source_transformations:
 			source = pat.sub(sub, source)
 
 		self.ast = ast.parse(source, unit.sourcename)
-		self.indent = indent
 		self.unit = unit
 		self.declnames = set()
 
@@ -231,6 +289,25 @@ class CodeBlock:
 		for child in ast.iter_child_nodes(node):
 			self.analyze_symbols(child, toplevel)
 
+	def evaluate(self, globaldict):
+		localdict = {
+			"producer": lambda func: func,
+			"consumer": lambda func: func,
+		}
+
+		exec(compile(self.ast, self.unit.sourcename, "exec"), globaldict, localdict)
+
+		for name, value in localdict.items():
+			if name in self.declnames:
+				globaldict[name] = value
+
+class TemplateCodeBlock(CodeBlock):
+
+	def __init__(self, source, indent, unit):
+		super().__init__(source, unit)
+
+		self.indent = indent
+
 	def evaluate(self, globaldict, outputfile):
 		lines = []
 
@@ -244,11 +321,7 @@ class CodeBlock:
 			"consumer": lambda func: func,
 		}
 
-		exec(compile(self.ast, self.unit.sourcename, "exec"), globaldict, localdict)
-
-		for name, value in localdict.items():
-			if name in self.declnames:
-				globaldict[name] = value
+		super().evaluate(globaldict)
 
 		for i, (line, delim, newline) in enumerate(lines):
 			if i > 0:
@@ -334,7 +407,7 @@ def main():
 			print("Bad filename extension:", filename, file=sys.stdout)
 			sys.exit(1)
 
-		project.add(filename)
+		project.add(filename, not base.endswith(".py"))
 
 	project.process()
 

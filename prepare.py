@@ -135,8 +135,6 @@ class Unit:
 				get_data(symbol.unit).consumers.add(self)
 
 	def evaluate(self, globaldict):
-		print("  Generate ", self.targetname)
-
 		dirname = os.path.dirname(self.targetname)
 		if dirname and not os.path.exists(dirname):
 			os.makedirs(dirname)
@@ -152,9 +150,27 @@ class Unit:
 			done = True
 		finally:
 			if done:
-				os.rename(tempname, self.targetname)
+				self.deploy(tempname)
 			else:
 				os.remove(tempname)
+
+	def deploy(self, tempname):
+		changed = True
+
+		if os.path.exists(self.targetname):
+			with open(tempname) as file:
+				newdata = file.read()
+
+			with open(self.targetname) as file:
+				olddata = file.read()
+
+			changed = (newdata != olddata)
+
+		if changed:
+			print("  Update   ", self.targetname)
+			os.rename(tempname, self.targetname)
+		else:
+			os.remove(tempname)
 
 class TextBlock:
 

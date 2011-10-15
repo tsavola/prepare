@@ -390,9 +390,27 @@ def reverse_topological_sort(vertices, edges):
 				queue.append(head)
 
 	if len(list) != len(vertices):
-		raise Exception('Cyclic dependencies')
+		raise Exception("\n\t".join(["Cyclic dependencies:"] + find_cycles(vertices, edges)))
 
 	return list
+
+def find_cycles(vertices, edges):
+	cycles = set()
+
+	for vertex in vertices:
+		find_cycle([vertex], vertex, edges, cycles)
+
+	return list(sorted(cycles))
+
+def find_cycle(seen, vertex, edges, cycles):
+	for head, tail in edges:
+		if head == vertex:
+			list = seen + [tail]
+
+			if tail in seen:
+				cycles.add(" -> ".join([unit.sourcename for unit in list]))
+			else:
+				find_cycle(list, tail, edges, cycles)
 
 def main():
 	parser = optparse.OptionParser(usage="Usage: %prog [options] FILE...")

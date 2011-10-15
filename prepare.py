@@ -50,6 +50,20 @@ class Project:
 				assert symbol.name not in symbolmap
 				symbolmap[symbol.name] = symbol
 
+		# TODO: recursive
+		for symbol in symbolmap.values():
+			for name in symbol.refnames:
+				# TODO: clean this up
+				if name in (s.name for s in symbol.unit.declsyms):
+					continue
+
+				if name in dir(__builtins__):
+					continue
+
+				ref = symbolmap[name]
+				if ref.resource:
+					symbol.set_resource(ref.resource, producer=ref.producer, consumer=ref.consumer)
+
 		datamap = {}
 
 		for unit in self.units:
@@ -100,10 +114,10 @@ class AbstractUnit:
 			symbol = symbolmap[name]
 
 			if symbol.producer:
-				get_data(symbol.unit).producers.add(self)
+				get_data(symbol.resource).producers.add(self)
 
 			if symbol.consumer:
-				get_data(symbol.unit).consumers.add(self)
+				get_data(symbol.resource).consumers.add(self)
 
 class TemplateUnit(AbstractUnit):
 
@@ -259,22 +273,24 @@ class CodeBlock:
 
 		self.analyze_symbols(self.ast)
 
-	def analyze_symbols(self, node, toplevel=True):
+	def analyze_symbols(self, node, toplevel=True, function=None):
 		if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
 			if toplevel and node.name[0].isupper():
-				producer = False
-				consumer = False
+				symbol = Symbol(node.name, self.unit)
 
 				for decor in node.decorator_list:
 					if isinstance(decor, ast.Name):
 						if decor.id == "producer":
-							producer = True
+							symbol.set_resource(self.unit, producer=True)
 
 						if decor.id == "consumer":
-							consumer = True
+							symbol.set_resource(self.unit, consumer=True)
 
-				self.unit.declsyms.add(Symbol(node.name, self.unit, producer, consumer))
+				self.unit.declsyms.add(symbol)
 				self.declnames.add(node.name)
+
+				if isinstance(node, ast.FunctionDef):
+					function = symbol
 
 			toplevel = False
 
@@ -286,8 +302,11 @@ class CodeBlock:
 			if isinstance(node.ctx, ast.Load):
 				self.unit.refnames.add(node.id)
 
+				if function:
+					function.refnames.add(node.id)
+
 		for child in ast.iter_child_nodes(node):
-			self.analyze_symbols(child, toplevel)
+			self.analyze_symbols(child, toplevel, function)
 
 	def evaluate(self, globaldict):
 		localdict = {
@@ -337,11 +356,19 @@ class TemplateCodeBlock(CodeBlock):
 
 class Symbol:
 
-	def __init__(self, name, unit, producer=False, consumer=False):
-		assert not (producer and consumer)
-
+	def __init__(self, name, unit):
 		self.name = name
 		self.unit = unit
+		self.resource = None
+		self.producer = False
+		self.consumer = False
+		self.refnames = set()
+
+	def set_resource(self, resource, producer=False, consumer=False):
+		assert not self.resource
+		assert not (producer and consumer)
+
+		self.resource = resource
 		self.producer = producer
 		self.consumer = consumer
 

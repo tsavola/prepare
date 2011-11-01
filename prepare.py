@@ -182,7 +182,7 @@ class TemplateUnit(AbstractUnit):
 			changed = (newdata != olddata)
 
 		if changed:
-			print("  Update   ", self.targetname)
+			print("  Prepare  ", self.targetname)
 			os.rename(tempname, self.targetname)
 		else:
 			os.remove(tempname)

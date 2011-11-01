@@ -72,6 +72,27 @@ class Project:
 		for unit in reverse_topological_sort(self.units, depends):
 			unit.evaluate(globaldict)
 
+	def adjust(self, filename):
+		assert self.outputdir # TODO
+
+		prefix = os.path.join(self.outputdir, "")
+		source = ""
+
+		with open(filename) as file:
+			for line in file:
+				if line.startswith("#"):
+					match = re.match(r'^(#\s*\d+\s+")([^"]+)(".*)$', line)
+					if match:
+						head, name, tail = match.groups()
+						if name.startswith(prefix):
+							name = name[len(prefix):] + "y"
+							line = "".join([head, name, tail]) + "\n"
+
+				source += line
+
+		with open(filename, "w") as file:
+			file.write(source)
+
 class AbstractUnit:
 
 	def __init__(self, sourcename):
@@ -415,10 +436,14 @@ def find_cycle(seen, vertex, edges, cycles):
 def main():
 	parser = optparse.OptionParser(usage="Usage: %prog [options] FILE...")
 	parser.add_option("-d", "--outputdir", metavar="DIR", default="", dest="outputdir", help="output directory")
+	parser.add_option("--post", action="store_const", const=postprocess, default=process, dest="mode", help="adjust postprocessed file")
 	options, args = parser.parse_args()
 
 	project = Project(options.outputdir)
 
+	options.mode(project, args)
+
+def process(project, args):
 	for filename in args:
 		base = os.path.basename(filename)
 		if not ("." in base and base.endswith("y")):
@@ -428,6 +453,10 @@ def main():
 		project.add(filename, not base.endswith(".py"))
 
 	project.process()
+
+def postprocess(project, args):
+	for filename in args:
+		project.adjust(filename)
 
 if __name__ == "__main__":
 	main()

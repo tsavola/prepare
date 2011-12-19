@@ -234,24 +234,6 @@ class CodeUnit(AbstractUnit):
 	def evaluate(self, globaldict):
 		self.block.evaluate(globaldict)
 
-	def deploy(self, tempname):
-		changed = True
-
-		if os.path.exists(self.targetname):
-			with open(tempname) as file:
-				newdata = file.read()
-
-			with open(self.targetname) as file:
-				olddata = file.read()
-
-			changed = (newdata != olddata)
-
-		if changed:
-			print("  Update   ", self.targetname)
-			os.rename(tempname, self.targetname)
-		else:
-			os.remove(tempname)
-
 class TextBlock:
 
 	def __init__(self, text):

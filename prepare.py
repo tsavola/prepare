@@ -206,6 +206,9 @@ class TemplateUnit(AbstractUnit):
 			print("  Prepare  ", self.targetname)
 			os.rename(tempname, self.targetname)
 		else:
+			if int(os.environ.get("PREPARE_VERBOSE", 0)) > 0:
+				print("  Unchanged", self.targetname)
+
 			os.remove(tempname)
 
 class CodeUnit(AbstractUnit):
